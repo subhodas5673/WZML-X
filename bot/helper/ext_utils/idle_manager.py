@@ -90,6 +90,9 @@ async def check_idle_loop():
                         LOGGER.info("Idle manager stopping after successful scale-to-zero request.")
                         return
 
+_idle_task = None
+
 def start_idle_manager():
+    global _idle_task
     from bot import bot_loop
-    bot_loop.create_task(check_idle_loop())
+    _idle_task = bot_loop.create_task(check_idle_loop())
