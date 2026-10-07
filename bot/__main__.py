@@ -223,4 +223,6 @@ LOGGER.info(f"Web UI: qBittorrent: /qbit/?pass={qbit_pwd}")
 LOGGER.info(f"Web UI: SABnzbd: /nzb/?pass={nzb_pwd}")
 
 LOGGER.info("WZ Client(s) & Services Started !")
+from .helper.ext_utils.idle_manager import start_idle_manager
+start_idle_manager()
 bot_loop.run_forever()
