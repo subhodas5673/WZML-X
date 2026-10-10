@@ -120,29 +120,16 @@ class HypertgUpload(HypertgTransfer):
 
         up_size = ospath.getsize(file_path)
         hyper_user_only = False
-
-        if Config.USE_HYPER:
-            if up_size > 2097152000 and any(k < 0 for k in self.clients):
-                if TgClient.user:
-                    use_hyper = False
-                    user_session = True
-                else:
-                    use_hyper = True
-                    hyper_user_only = True
-                    user_session = False
-            else:
-                use_hyper = bool(self.clients) and up_size > 10 * 1024 * 1024
-        else:
-            use_hyper = False
-            if up_size > 2097152000 and TgClient.user:
+        if up_size > 2097152000 and any(k < 0 for k in self.clients):
+            if TgClient.user:
+                use_hyper = False
                 user_session = True
-
-            direct_limit = TgClient.MAX_SPLIT_SIZE if (user_session and TgClient.user) else 2097152000
-            if up_size > direct_limit:
-                raise ValueError(
-                    f"HyperUP is disabled and no supported direct-upload session is available "
-                    f"for file size {up_size} bytes."
-                )
+            else:
+                use_hyper = True
+                hyper_user_only = True
+                user_session = False
+        else:
+            use_hyper = Config.USE_HYPER and self.clients and up_size > 10 * 1024 * 1024
         if self._listener.up_dest:
             upload_chat_id = self._listener.up_dest
             thread_id = self._listener.chat_thread_id
@@ -170,7 +157,6 @@ class HypertgUpload(HypertgTransfer):
                     title=title,
                     user_only=hyper_user_only,
                 )
-                LOGGER.info(f"HypertgUL uploaded {self._up_file}")
             else:
                 direct_rply = (
                     reply_msg_id if upload_chat_id == reply_target.chat.id else None
@@ -190,8 +176,8 @@ class HypertgUpload(HypertgTransfer):
                     title=title,
                     user_session=user_session,
                 )
-                LOGGER.info(f"Direct uploaded {self._up_file}")
 
+            LOGGER.info(f"HypertgUL uploaded {self._up_file}")
             return sent
 
         except StopTransmission:
