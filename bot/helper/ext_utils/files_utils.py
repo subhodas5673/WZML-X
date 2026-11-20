@@ -310,6 +310,7 @@ class SevenZ:
         self._listener = listener
         self._processed_bytes = 0
         self._percentage = "0%"
+        self.error = ""
 
     @property
     def processed_bytes(self):
@@ -491,11 +492,14 @@ class SevenZ:
                         LOGGER.error(
                             f"Fallback {unrar_bin} also failed (code {fb_code}): {fb_err_msg}"
                         )
+                        if fb_err_msg:
+                            err_msg = fb_err_msg
                 except Exception as e:
                     LOGGER.error(
                         f"Error during fallback extraction with {unrar_bin}: {e}"
                     )
 
+            self.error = err_msg
             LOGGER.error(f"{err_msg}. Unable to extract archive!. Path: {f_path}")
         return code
 
@@ -576,5 +580,6 @@ class SevenZ:
                     pass
             if not err_msg:
                 err_msg = "Unable to decode the error!"
+            self.error = err_msg
             LOGGER.error(f"{err_msg}. Unable to zip this path: {dl_path}")
             return dl_path

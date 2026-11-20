@@ -923,12 +923,15 @@ class TaskConfig:
             else:
                 if t_path and t_path != dl_path:
                     await clean_target(t_path)
-        if self.is_file and code == 0:
-            return t_path
-        else:
-            if code != 0 and t_path and t_path != dl_path:
+                break
+        if code != 0:
+            if t_path and t_path != dl_path:
                 await clean_target(t_path)
-            return dl_path
+            err = sevenz.error or f"Unable to extract archive: {self.name}"
+            await self.on_download_error(f"Extraction failed: {err}")
+            self.is_cancelled = True
+            return False
+        return t_path if self.is_file else dl_path
 
     async def proceed_ffmpeg(self, dl_path, gid):
         cores, _ = ffmpeg_layout()

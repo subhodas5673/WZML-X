@@ -239,7 +239,7 @@ class TaskListener(TaskConfig):
 
         if self.extract and not self.is_nzb:
             up_path = await self.proceed_extract(up_path, gid)
-            if self.is_cancelled:
+            if self.is_cancelled or not up_path:
                 return
             self.is_file = await aiopath.isfile(up_path)
             self.name = up_path.replace(f"{up_dir}/", "").split("/", 1)[0]
