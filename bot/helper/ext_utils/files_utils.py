@@ -1,6 +1,7 @@
 from aioshutil import rmtree as aiormtree, move
 from asyncio import create_subprocess_exec, sleep, wait_for
 from asyncio.subprocess import PIPE
+from shutil import which
 from psutil import disk_usage
 from os import path as ospath, readlink, walk
 from re import I, escape, search as re_search, split as re_split
@@ -362,20 +363,33 @@ class SevenZ:
         self._percentage = "0%"
 
     async def extract(self, f_path, t_path, pswd):
+        if pswd:
+            pswd = str(pswd).strip()
+            if (pswd.startswith('"') and pswd.endswith('"')) or (
+                pswd.startswith("'") and pswd.endswith("'")
+            ):
+                pswd = pswd[1:-1].strip()
+        else:
+            pswd = ""
+
+        sevenz_bin = which("7zz") or which("7z") or "7z"
         cmd = [
-            "7z",
+            sevenz_bin,
             "x",
-            f"-p{pswd}",
             f_path,
             f"-o{t_path}",
             "-aot",
             "-xr!@PaxHeader",
             "-bsp1",
-            "-bse1",
+            "-bse2",
             "-bb3",
+            "-y",
         ]
-        if not pswd:
-            del cmd[2]
+        if pswd:
+            cmd.insert(2, f"-p{pswd}")
+        else:
+            cmd.insert(2, "-p-")
+
         if self._listener.is_cancelled:
             return False
         self._listener.subproc = await create_subprocess_exec(
@@ -384,7 +398,7 @@ class SevenZ:
             stderr=PIPE,
         )
         await self._sevenz_progress()
-        _, stderr = await self._listener.subproc.communicate()
+        out, stderr = await self._listener.subproc.communicate()
         code = self._listener.subproc.returncode
         if self._listener.is_cancelled:
             return False
@@ -392,41 +406,134 @@ class SevenZ:
             self._listener.is_cancelled = True
             return False
         elif code != 0:
-            try:
-                stderr = stderr.decode().strip()
-            except Exception:
-                stderr = "Unable to decode the error!"
-            LOGGER.error(f"{stderr}. Unable to extract archive!. Path: {f_path}")
+            err_msg = ""
+            if stderr:
+                try:
+                    err_msg = stderr.decode().strip()
+                except Exception:
+                    pass
+            if not err_msg and out:
+                try:
+                    out_decoded = out.decode()
+                    lines = [
+                        line.strip()
+                        for line in out_decoded.splitlines()
+                        if any(
+                            k in line.lower()
+                            for k in (
+                                "error",
+                                "wrong password",
+                                "unsupported",
+                                "cannot open",
+                                "can not open",
+                            )
+                        )
+                    ]
+                    if lines:
+                        err_msg = "; ".join(lines)
+                    elif out_decoded.strip():
+                        err_msg = out_decoded.strip().splitlines()[-1]
+                except Exception:
+                    pass
+            if not err_msg:
+                err_msg = "Unknown extraction error"
+
+            is_rar = (
+                f_path.lower().endswith((".rar", ".cbr"))
+                or is_first_archive_split(f_path)
+            )
+            if is_rar and (unrar_bin := (which("unrar") or which("unar"))):
+                LOGGER.info(
+                    f"7z extraction failed (code {code}: {err_msg}). Attempting fallback with {unrar_bin} for: {f_path}"
+                )
+                await clean_target(t_path)
+                await aiomakedirs(t_path, exist_ok=True)
+                if unrar_bin.endswith("unrar"):
+                    fallback_cmd = [
+                        unrar_bin,
+                        "x",
+                        "-y",
+                        "-o+",
+                        f"-p{pswd}" if pswd else "-p-",
+                        f_path,
+                        f"{t_path}/",
+                    ]
+                else:
+                    fallback_cmd = [
+                        unrar_bin,
+                        "-o",
+                        t_path,
+                        "-f",
+                        "-D",
+                    ]
+                    if pswd:
+                        fallback_cmd.extend(["-p", pswd])
+                    fallback_cmd.append(f_path)
+
+                try:
+                    self._listener.subproc = await create_subprocess_exec(
+                        *fallback_cmd,
+                        stdout=PIPE,
+                        stderr=PIPE,
+                    )
+                    fb_out, fb_err = await self._listener.subproc.communicate()
+                    fb_code = self._listener.subproc.returncode
+                    if fb_code == 0:
+                        LOGGER.info(
+                            f"Successfully extracted archive using fallback {unrar_bin} for: {f_path}"
+                        )
+                        return 0
+                    else:
+                        fb_err_msg = (
+                            fb_err.decode(errors="ignore")
+                            or fb_out.decode(errors="ignore")
+                        ).strip()
+                        LOGGER.error(
+                            f"Fallback {unrar_bin} also failed (code {fb_code}): {fb_err_msg}"
+                        )
+                except Exception as e:
+                    LOGGER.error(
+                        f"Error during fallback extraction with {unrar_bin}: {e}"
+                    )
+
+            LOGGER.error(f"{err_msg}. Unable to extract archive!. Path: {f_path}")
         return code
 
     async def zip(self, dl_path, up_path, pswd):
+        if pswd:
+            pswd = str(pswd).strip()
+            if (pswd.startswith('"') and pswd.endswith('"')) or (
+                pswd.startswith("'") and pswd.endswith("'")
+            ):
+                pswd = pswd[1:-1].strip()
+        else:
+            pswd = ""
         size = await get_path_size(dl_path)
         if self._listener.equal_splits:
             parts = -(-size // self._listener.split_size)
             split_size = (size // parts) + (size % parts)
         else:
             split_size = self._listener.split_size
+        sevenz_bin = which("7zz") or which("7z") or "7z"
         cmd = [
-            "7z",
+            sevenz_bin,
             f"-v{split_size}b",
             "a",
             "-mx=0",
             "-mmt=on",
-            f"-p{pswd}",
             up_path,
             dl_path,
             "-bsp1",
-            "-bse1",
+            "-bse2",
             "-bb3",
+            "-y",
         ]
+        if pswd:
+            cmd.insert(5, f"-p{pswd}")
         if self._listener.is_leech and int(size) > self._listener.split_size:
-            if not pswd:
-                del cmd[5]
             LOGGER.info(f"Zip: orig_path: {dl_path}, zip_path: {up_path}.0*")
         else:
             del cmd[1]
-            if not pswd:
-                del cmd[4]
             LOGGER.info(f"Zip: orig_path: {dl_path}, zip_path: {up_path}")
         if self._listener.is_cancelled:
             return False
@@ -434,7 +541,7 @@ class SevenZ:
             *cmd, stdout=PIPE, stderr=PIPE
         )
         await self._sevenz_progress()
-        _, stderr = await self._listener.subproc.communicate()
+        out, stderr = await self._listener.subproc.communicate()
         code = self._listener.subproc.returncode
         if self._listener.is_cancelled:
             return False
@@ -447,9 +554,27 @@ class SevenZ:
         else:
             if await aiopath.exists(up_path):
                 await remove(up_path)
-            try:
-                stderr = stderr.decode().strip()
-            except Exception:
-                stderr = "Unable to decode the error!"
-            LOGGER.error(f"{stderr}. Unable to zip this path: {dl_path}")
+            err_msg = ""
+            if stderr:
+                try:
+                    err_msg = stderr.decode().strip()
+                except Exception:
+                    pass
+            if not err_msg and out:
+                try:
+                    out_decoded = out.decode()
+                    lines = [
+                        line.strip()
+                        for line in out_decoded.splitlines()
+                        if "error" in line.lower()
+                    ]
+                    if lines:
+                        err_msg = "; ".join(lines)
+                    elif out_decoded.strip():
+                        err_msg = out_decoded.strip().splitlines()[-1]
+                except Exception:
+                    pass
+            if not err_msg:
+                err_msg = "Unable to decode the error!"
+            LOGGER.error(f"{err_msg}. Unable to zip this path: {dl_path}")
             return dl_path

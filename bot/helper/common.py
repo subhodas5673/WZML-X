@@ -38,6 +38,7 @@ from .ext_utils.filter_utils import MessageFilter
 from .ext_utils.bulk_links import extract_bulk_links
 from .ext_utils.files_utils import (
     SevenZ,
+    clean_target,
     get_base_name,
     get_path_size,
     is_archive,
@@ -861,6 +862,13 @@ class TaskConfig:
 
     async def proceed_extract(self, dl_path, gid):
         pswd = self.extract if isinstance(self.extract, str) else ""
+        if pswd:
+            pswd = pswd.strip()
+            if (pswd.startswith('"') and pswd.endswith('"')) or (
+                pswd.startswith("'") and pswd.endswith("'")
+            ):
+                pswd = pswd[1:-1].strip()
+
         self.files_to_proceed = []
         if self.is_file and is_archive(dl_path):
             self.files_to_proceed.append(dl_path)
@@ -882,10 +890,10 @@ class TaskConfig:
         async with task_dict_lock:
             task_dict[self.mid] = SevenZStatus(self, sevenz, gid, "Extract")
         t_path = dl_path
+        code = 0
         for dirpath, _, files in await sync_to_async(
             walk, self.up_dir or self.dir, topdown=False
         ):
-            code = 0
             for file_ in files:
                 if self.is_cancelled:
                     return False
@@ -900,6 +908,8 @@ class TaskConfig:
                     if not self.is_file:
                         self.subname = file_
                     code = await sevenz.extract(f_path, t_path, pswd)
+                    if code != 0:
+                        break
             if self.is_cancelled:
                 return code
             if code == 0:
@@ -910,7 +920,15 @@ class TaskConfig:
                             await remove(del_path)
                         except Exception:
                             self.is_cancelled = True
-        return t_path if self.is_file and code == 0 else dl_path
+            else:
+                if t_path and t_path != dl_path:
+                    await clean_target(t_path)
+        if self.is_file and code == 0:
+            return t_path
+        else:
+            if code != 0 and t_path and t_path != dl_path:
+                await clean_target(t_path)
+            return dl_path
 
     async def proceed_ffmpeg(self, dl_path, gid):
         cores, _ = ffmpeg_layout()

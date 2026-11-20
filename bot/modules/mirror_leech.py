@@ -210,6 +210,26 @@ class Mirror(TaskListener):
         self.link = args["link"]
         self.compress = args["-z"]
         self.extract = args["-e"]
+
+        if not self.link and isinstance(self.extract, str) and (
+            is_url(self.extract)
+            or is_magnet(self.extract)
+            or is_rclone_path(self.extract)
+            or is_gdrive_id(self.extract)
+            or is_telegram_link(self.extract)
+        ):
+            self.link = self.extract
+            self.extract = True
+
+        if not self.link and isinstance(self.compress, str) and (
+            is_url(self.compress)
+            or is_magnet(self.compress)
+            or is_rclone_path(self.compress)
+            or is_gdrive_id(self.compress)
+            or is_telegram_link(self.compress)
+        ):
+            self.link = self.compress
+            self.compress = True
         self.join = args["-j"]
         self.thumb = args["-t"]
         self.split_size = args["-sp"]

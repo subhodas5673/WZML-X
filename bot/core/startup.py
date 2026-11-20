@@ -1,6 +1,8 @@
 from asyncio import create_subprocess_shell, gather, sleep
 from importlib import import_module
 from os import environ, path as ospath, getenv
+from shutil import which
+from sys import platform
 
 from aiofiles import open as aiopen
 from aiofiles.os import makedirs, remove, path as aiopath
@@ -370,6 +372,13 @@ async def update_variables():
 
 
 async def load_configurations():
+    if platform != "win32" and not which("7zz") and not which("unrar"):
+        LOGGER.info("Modern archive extraction tools not found. Attempting package install...")
+        await cmd_exec(
+            "apt-get update -qq && apt-get install -y --no-install-recommends 7zip unrar p7zip-rar >/dev/null 2>&1 || true",
+            shell=True,
+        )
+
     if not await aiopath.exists(".netrc"):
         async with aiopen(".netrc", "w"):
             pass
